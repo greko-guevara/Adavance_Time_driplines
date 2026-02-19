@@ -1,23 +1,19 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 
 # ------------------------------------------------------
-# PAGE CONFIGURATION
+# PAGE CONFIG
 # ------------------------------------------------------
-st.set_page_config(
-    page_title="Hydraulic Advance Time – Professional Tool",
-    layout="wide",
-    page_icon="💧"
-)
+st.set_page_config(layout="wide", page_title="Hydraulic Advance Professional Tool")
 
-st.title("Hydraulic Advance Time Model for Driplines")
+st.title("Hydraulic Advance Analysis for Driplines")
 
 st.markdown("""
-Professional hydraulic advance time estimator for drip irrigation laterals.
+Professional hydraulic advance and energy dissipation model.
 
-Model inspired by empirical findings reported in:  
+Inspired by empirical findings reported in:  
 🔗 [DOI: 10.4236/as.2025.1612082](https://www.scirp.org/journal/paperinformation?paperid=148372)
 """)
 
@@ -26,115 +22,130 @@ Model inspired by empirical findings reported in:
 # ------------------------------------------------------
 st.sidebar.header("Hydraulic Parameters")
 
-spacing = st.sidebar.number_input("Emitter Spacing (m)", 0.05, 1.0, 0.30, 0.05)
-length = st.sidebar.number_input("Reference Lateral Length (m)", 1.0, 500.0, 150.0, 10.0)
-diameter = st.sidebar.number_input("Internal Diameter (mm)", 8.0, 32.0, 16.0, 1.0)
-flow_dripper = st.sidebar.number_input("Emitter Flow Rate (L/h)", 0.5, 8.0, 1.6, 0.1)
+spacing = st.sidebar.number_input("Emitter Spacing (m)", 0.05, 1.0, 0.30)
+length = st.sidebar.number_input("Lateral Length (m)", 10.0, 500.0, 150.0)
+diameter_mm = st.sidebar.number_input("Internal Diameter (mm)", 8.0, 32.0, 16.0)
+flow_lph = st.sidebar.number_input("Emitter Flow (L/h)", 0.5, 8.0, 1.6)
 
 # ------------------------------------------------------
-# MODEL FUNCTION
+# HYDRAULIC MODEL
 # ------------------------------------------------------
-def travel_time(spacing, length, diameter, flow_dripper):
-    return 0.0912 * (
-        (spacing ** 0.7824) *
-        (length ** 0.1928) *
-        (diameter ** 2)
-    ) / flow_dripper
 
-# ------------------------------------------------------
-# MAIN CALCULATION
-# ------------------------------------------------------
-TT_full = travel_time(spacing, length, diameter, flow_dripper)
-TT_95 = TT_full / 2
+diameter = diameter_mm / 1000
+area = np.pi * (diameter / 2)**2
+flow_m3s = flow_lph / 1000 / 3600
 
-col1, col2 = st.columns(2)
-col1.metric("Travel Time – Full Length (min)", f"{TT_full:.2f}")
-col2.metric("Travel Time – 95% Length (min)", f"{TT_95:.2f}")
+segments = 100
+dx = length / segments
 
-st.markdown("---")
+long_acum = []
+HL_acum = []
+v_tramo = []
+t_acum = []
 
-# ======================================================
-# GRAPH 1: Travel Time vs Lateral Length
-# ======================================================
-st.subheader("1️⃣ Travel Time vs Lateral Length")
+g = 9.81
+f = 0.03  # assumed friction factor
+Q = (length/spacing) * flow_m3s
 
-length_range = np.linspace(10, 300, 200)
-TT_values = travel_time(spacing, length_range, diameter, flow_dripper)
+headloss_total = 0
+time_total = 0
 
-fig1 = go.Figure()
-fig1.add_trace(go.Scatter(
-    x=length_range,
-    y=TT_values,
-    mode='lines',
-    name="Travel Time",
-    line=dict(width=4)
-))
+for i in range(segments):
+    x = dx * (i + 1)
+    emitters_remaining = (length - x) / spacing
+    Q_segment = emitters_remaining * flow_m3s
+    v = Q_segment / area
 
-fig1.update_layout(
-    xaxis_title="Lateral Length (m)",
-    yaxis_title="Travel Time (min)",
-    template="plotly_white",
-    title="Advance Time as Function of Lateral Length",
-    height=500
-)
+    hf = f * (dx/diameter) * (v**2)/(2*g)
 
-st.plotly_chart(fig1, use_container_width=True)
+    dt = dx / max(v, 1e-6)
 
+    headloss_total += hf
+    time_total += dt
 
-# ======================================================
-# GRAPH 2: Lateral Length vs Inlet Flow Velocity
-# ======================================================
-st.subheader("2️⃣ Lateral Length vs Inlet Flow Velocity")
+    long_acum.append(x)
+    HL_acum.append(headloss_total)
+    v_tramo.append(v)
+    t_acum.append(time_total/60)
 
-# Convert diameter to meters
-diameter_m = diameter / 1000
-
-# Cross-sectional area (m²)
-area = np.pi * (diameter_m / 2) ** 2
-
-# Convert emitter flow to m³/s
-flow_m3s = flow_dripper / 1000 / 3600
-
-# Number of emitters for each length
-emitters = length_range / spacing
-
-# Inlet flow for each length
-Q_inlet = emitters * flow_m3s
-
-# Velocity at inlet
-velocity = Q_inlet / area
-
-fig2 = go.Figure()
-fig2.add_trace(go.Scatter(
-    x=length_range,
-    y=velocity,
-    mode='lines',
-    name="Inlet Velocity",
-    line=dict(width=4)
-))
-
-fig2.update_layout(
-    xaxis_title="Lateral Length (m)",
-    yaxis_title="Inlet Flow Velocity (m/s)",
-    template="plotly_white",
-    title="Inlet Velocity as Function of Lateral Length",
-    height=500
-)
-
-st.plotly_chart(fig2, use_container_width=True)
+df = pd.DataFrame({
+    "long_acum": long_acum,
+    "HL_acum": HL_acum,
+    "v_tramo": v_tramo,
+    "t_acum": t_acum
+})
 
 # ------------------------------------------------------
-# TECHNICAL NOTES
+# GRAPHICS
 # ------------------------------------------------------
-st.markdown("---")
-st.subheader("Engineering Interpretation")
 
-st.markdown("""
-• Travel time increases sub-linearly with lateral length.  
-• Travel time increases quadratically with diameter.  
-• Higher emitter flow reduces advance time.  
-• Velocity is estimated assuming steady internal pipe flow.
+fig = plt.figure(figsize=(16, 6))
 
-This tool provides operational support for irrigation system design,
-pressurization analysis, and performance evaluation.
-""")
+def configurar_ejes(ax):
+    ax.grid(False)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(1.5)
+    ax.spines['bottom'].set_linewidth(1.5)
+    ax.tick_params(labelsize=12)
+
+# GRAPH A
+ax1 = fig.add_subplot(131)
+configurar_ejes(ax1)
+
+ax1.set_xlabel('Length of pipe (m)')
+ax1.set_ylabel('Accumulated headloss (m)', color='red')
+ax1.plot(df['long_acum'], df['HL_acum'], 'r--', label="Headloss")
+ax1.tick_params(axis='y', labelcolor='red')
+ax1.set_title('(A)')
+
+ax2 = ax1.twinx()
+configurar_ejes(ax2)
+ax2.set_ylabel('Travel time (min)', color='blue')
+ax2.scatter(df['long_acum'], df['t_acum'], color='blue', s=10)
+ax2.tick_params(axis='y', labelcolor='blue')
+
+# GRAPH B
+ax1 = fig.add_subplot(132)
+configurar_ejes(ax1)
+
+ax1.set_xlabel('Length of pipe (m)')
+ax1.set_ylabel('Velocity (m/s)', color='red')
+ax1.plot(df['long_acum'], df['v_tramo'], 'r--')
+ax1.tick_params(axis='y', labelcolor='red')
+ax1.set_title('(B)')
+
+ax2 = ax1.twinx()
+configurar_ejes(ax2)
+ax2.set_ylabel('Travel time (min)', color='blue')
+ax2.scatter(df['long_acum'], df['t_acum'], color='blue', s=10)
+ax2.tick_params(axis='y', labelcolor='blue')
+
+# GRAPH C
+a = np.linspace(0,1,100)
+b = np.exp(-4*a)
+c = 1 - b
+
+ax1 = fig.add_subplot(133)
+configurar_ejes(ax1)
+
+ax1.set_xlabel('Relative advance time')
+ax1.set_ylabel('Relative length of dripline', color='red')
+ax1.plot(a, b, 'r')
+ax1.set_title('(C)')
+
+ax2 = ax1.twinx()
+configurar_ejes(ax2)
+ax2.set_ylabel('Cumulative relative length', color='blue')
+ax2.plot(a, c, 'b')
+
+plt.tight_layout()
+plt.savefig("hydraulic_advance_figure.png", dpi=300, bbox_inches='tight')
+
+st.pyplot(fig)
+
+# ------------------------------------------------------
+# RESULTS
+# ------------------------------------------------------
+st.metric("Total Travel Time (min)", f"{df['t_acum'].iloc[-1]:.2f}")
+st.metric("Total Headloss (m)", f"{df['HL_acum'].iloc[-1]:.3f}")
