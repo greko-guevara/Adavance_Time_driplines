@@ -1,23 +1,24 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 
 # ------------------------------------------------------
 # PAGE CONFIGURATION
 # ------------------------------------------------------
 st.set_page_config(
-    page_title="Hydraulic Advance Time – Dripline Model",
+    page_title="Hydraulic Advance Time – Professional Tool",
     layout="wide",
     page_icon="💧"
 )
 
 st.title("Hydraulic Advance Time Model for Driplines")
-st.markdown("""
-Professional tool for estimating hydraulic advance time in drip irrigation laterals.
 
-Model inspired by empirical analysis reported in:
-DOI: 10.4236/as.2025.1612082
+st.markdown("""
+Professional hydraulic advance time estimator for drip irrigation laterals.
+
+Model inspired by empirical findings reported in:  
+🔗 [DOI: 10.4236/as.2025.1612082](https://www.scirp.org/journal/paperinformation?paperid=148372)
 """)
 
 # ------------------------------------------------------
@@ -25,133 +26,108 @@ DOI: 10.4236/as.2025.1612082
 # ------------------------------------------------------
 st.sidebar.header("Hydraulic Parameters")
 
-spacing = st.sidebar.number_input(
-    "Emitter Spacing (m)",
-    min_value=0.05,
-    value=0.30,
-    step=0.05
-)
-
-length = st.sidebar.number_input(
-    "Lateral Length (m)",
-    min_value=1.0,
-    value=150.0,
-    step=10.0
-)
-
-diameter = st.sidebar.number_input(
-    "Internal Diameter (mm)",
-    min_value=8.0,
-    value=16.0,
-    step=1.0
-)
-
-flow_dripper = st.sidebar.number_input(
-    "Emitter Flow Rate (L/h)",
-    min_value=0.5,
-    value=1.6,
-    step=0.1
-)
-
-st.sidebar.markdown("---")
-run_sensitivity = st.sidebar.checkbox("Enable Sensitivity Analysis")
+spacing = st.sidebar.number_input("Emitter Spacing (m)", 0.05, 1.0, 0.30, 0.05)
+length = st.sidebar.number_input("Reference Lateral Length (m)", 1.0, 500.0, 150.0, 10.0)
+diameter = st.sidebar.number_input("Internal Diameter (mm)", 8.0, 32.0, 16.0, 1.0)
+flow_dripper = st.sidebar.number_input("Emitter Flow Rate (L/h)", 0.5, 8.0, 1.6, 0.1)
 
 # ------------------------------------------------------
-# MODEL CALCULATION
+# MODEL FUNCTION
 # ------------------------------------------------------
-TT_full = 0.0912 * (
-    (spacing ** 0.7824) *
-    (length ** 0.1928) *
-    (diameter ** 2)
-) / flow_dripper
+def travel_time(spacing, length, diameter, flow_dripper):
+    return 0.0912 * (
+        (spacing ** 0.7824) *
+        (length ** 0.1928) *
+        (diameter ** 2)
+    ) / flow_dripper
 
+# ------------------------------------------------------
+# MAIN CALCULATION
+# ------------------------------------------------------
+TT_full = travel_time(spacing, length, diameter, flow_dripper)
 TT_95 = TT_full / 2
 
-# ------------------------------------------------------
-# METRICS DISPLAY
-# ------------------------------------------------------
 col1, col2 = st.columns(2)
-
 col1.metric("Travel Time – Full Length (min)", f"{TT_full:.2f}")
 col2.metric("Travel Time – 95% Length (min)", f"{TT_95:.2f}")
 
 st.markdown("---")
 
-# ------------------------------------------------------
-# ADVANCE CURVE SIMULATION
-# ------------------------------------------------------
-st.subheader("Hydraulic Advance Curve")
+# ======================================================
+# GRAPH 1: Travel Time vs Lateral Length
+# ======================================================
+st.subheader("1️⃣ Travel Time vs Lateral Length")
 
-relative_time = np.linspace(0, 1, 200)
-relative_length = 1 - np.exp(-4 * relative_time)
+length_range = np.linspace(10, 300, 100)
+TT_values = travel_time(spacing, length_range, diameter, flow_dripper)
 
-fig, ax = plt.subplots(figsize=(8, 5))
-ax.plot(relative_time * TT_full, relative_length * length)
-ax.set_xlabel("Time (minutes)")
-ax.set_ylabel("Distance Reached (m)")
-ax.set_title("Simulated Hydraulic Advance Along Dripline")
-ax.grid(True)
+fig1 = go.Figure()
+fig1.add_trace(go.Scatter(
+    x=length_range,
+    y=TT_values,
+    mode='lines',
+    name="Travel Time",
+))
 
-st.pyplot(fig)
-
-# ------------------------------------------------------
-# SENSITIVITY ANALYSIS
-# ------------------------------------------------------
-if run_sensitivity:
-    st.markdown("---")
-    st.subheader("Sensitivity Analysis – Diameter Effect")
-
-    diam_range = np.linspace(diameter * 0.6, diameter * 1.4, 50)
-
-    TT_sensitivity = 0.0912 * (
-        (spacing ** 0.7824) *
-        (length ** 0.1928) *
-        (diam_range ** 2)
-    ) / flow_dripper
-
-    fig2, ax2 = plt.subplots(figsize=(8, 5))
-    ax2.plot(diam_range, TT_sensitivity)
-    ax2.set_xlabel("Internal Diameter (mm)")
-    ax2.set_ylabel("Travel Time (min)")
-    ax2.set_title("Sensitivity of Travel Time to Diameter")
-    ax2.grid(True)
-
-    st.pyplot(fig2)
-
-# ------------------------------------------------------
-# EXPORT SECTION
-# ------------------------------------------------------
-st.markdown("---")
-st.subheader("Export Results")
-
-results_df = pd.DataFrame({
-    "Emitter Spacing (m)": [spacing],
-    "Length (m)": [length],
-    "Diameter (mm)": [diameter],
-    "Emitter Flow (L/h)": [flow_dripper],
-    "Travel Time Full (min)": [TT_full],
-    "Travel Time 95% (min)": [TT_95]
-})
-
-st.download_button(
-    label="Download Results as CSV",
-    data=results_df.to_csv(index=False),
-    file_name="hydraulic_advance_results.csv",
-    mime="text/csv"
+fig1.update_layout(
+    xaxis_title="Lateral Length (m)",
+    yaxis_title="Travel Time (min)",
+    template="plotly_white",
+    title="Advance Time as Function of Lateral Length",
+    height=500
 )
+
+st.plotly_chart(fig1, use_container_width=True)
+
+# ======================================================
+# GRAPH 2: Lateral Length vs Flow Velocity
+# ======================================================
+st.subheader("2️⃣ Lateral Length vs Flow Velocity")
+
+# Convert diameter from mm to meters
+diameter_m = diameter / 1000
+
+# Flow per emitter converted from L/h to m³/s
+flow_m3s = flow_dripper / 1000 / 3600
+
+# Cross-sectional area
+area = np.pi * (diameter_m / 2) ** 2
+
+# Velocity
+velocity = flow_m3s / area
+
+velocity_array = np.full_like(length_range, velocity)
+
+fig2 = go.Figure()
+fig2.add_trace(go.Scatter(
+    x=length_range,
+    y=velocity_array,
+    mode='lines',
+    name="Flow Velocity",
+))
+
+fig2.update_layout(
+    xaxis_title="Lateral Length (m)",
+    yaxis_title="Average Flow Velocity (m/s)",
+    template="plotly_white",
+    title="Estimated Internal Flow Velocity",
+    height=500
+)
+
+st.plotly_chart(fig2, use_container_width=True)
 
 # ------------------------------------------------------
 # TECHNICAL NOTES
 # ------------------------------------------------------
 st.markdown("---")
-st.subheader("Technical Interpretation")
+st.subheader("Engineering Interpretation")
 
 st.markdown("""
+• Travel time increases sub-linearly with lateral length.  
 • Travel time increases quadratically with diameter.  
-• It increases sub-linearly with lateral length (exponent 0.1928).  
 • Higher emitter flow reduces advance time.  
-• Spacing influences internal filling dynamics.
+• Velocity is estimated assuming steady internal pipe flow.
 
-This model provides an operational estimate of pressurization advance 
-for irrigation design and performance assessment.
+This tool provides operational support for irrigation system design,
+pressurization analysis, and performance evaluation.
 """)
