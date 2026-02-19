@@ -1,140 +1,199 @@
+# ==========================================================
+# HYDRAULIC ADVANCE ANALYSIS – EMPIRICAL + SEGMENT MODEL
+# ==========================================================
+
 import streamlit as st
-import numpy as np
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 
-# ------------------------------------------------------
+# ----------------------------------------------------------
 # PAGE CONFIGURATION
-# ------------------------------------------------------
-st.set_page_config(layout="wide", page_title="Hydraulic Advance Empirical Model")
+# ----------------------------------------------------------
+
+st.set_page_config(page_title="Hydraulic Advance Analysis", layout="wide")
 
 st.title("Hydraulic Advance Analysis for Driplines")
 
 st.markdown("""
-Empirical advance time model based on:
+Empirical model reference:
 
-🔗 [DOI: 10.4236/as.2025.1612082](https://www.scirp.org/journal/paperinformation?paperid=148372)
+🔗 DOI: [10.4236/as.2025.1612082](https://www.scirp.org/journal/paperinformation?paperid=148372)
 """)
 
-# ------------------------------------------------------
+# ----------------------------------------------------------
 # SIDEBAR INPUTS
-# ------------------------------------------------------
-st.sidebar.header("Hydraulic Parameters")
+# ----------------------------------------------------------
 
-spacing = st.sidebar.number_input("Emitter Spacing (m)", 0.05, 1.0, 0.30)
-length = st.sidebar.number_input("Lateral Length (m)", 10.0, 500.0, 150.0)
-diameter_mm = st.sidebar.number_input("Internal Diameter (mm)", 8.0, 32.0, 16.0)
-flow_lph = st.sidebar.number_input("Emitter Flow (L/h)", 0.5, 8.0, 1.6)
+st.sidebar.header("Input Parameters")
 
-# ------------------------------------------------------
-# EMPIRICAL TRAVEL TIME CALCULATION
-# ------------------------------------------------------
-TT_full = 0.0912 * (
-    (spacing ** 0.7824) *
-    (length ** 0.1928) *
-    (diameter_mm ** 2)
-) / flow_lph
+q = st.sidebar.number_input("Emitter flow rate (L/h)", 0.1, 10.0, 1.0)
+S = st.sidebar.number_input("Emitter spacing (m)", 0.05, 2.0, 0.5)
+L = st.sidebar.number_input("Dripline length (m)", 10.0, 1000.0, 150.0)
+dia = st.sidebar.number_input("Internal diameter (mm)", 8.0, 40.0, 20.2)
 
-TT_95 = TT_full / 2
+# ----------------------------------------------------------
+# EMPIRICAL TRAVEL TIME
+# ----------------------------------------------------------
 
-# ------------------------------------------------------
-# VELOCITY CALCULATION (PHYSICAL, NOT FOR TIME)
-# ------------------------------------------------------
-diameter_m = diameter_mm / 1000
-area = np.pi * (diameter_m / 2) ** 2
-flow_m3s = flow_lph / 1000 / 3600
+TT_empirical = 0.0912 * (
+    (S ** 0.7824) *
+    (L ** 0.1928) *
+    (dia ** 2)
+) / q
 
-emitters = length / spacing
-Q_inlet = emitters * flow_m3s
-velocity_inlet = Q_inlet / area
+TT_95_empirical = TT_empirical / 2
 
-# ------------------------------------------------------
-# BUILD ADVANCE CURVE BASED ON EMPIRICAL TIME
-# ------------------------------------------------------
-segments = 100
-long_acum = np.linspace(0, length, segments)
+# ----------------------------------------------------------
+# SEGMENTED HYDRAULIC MODEL
+# ----------------------------------------------------------
 
-relative_length = long_acum / length
-t_acum = TT_full * (1 - np.exp(-4 * relative_length))
+outlets = int(L / S)
 
-# simple smooth accumulated headloss trend for visualization
-HL_acum = 5 * (1 - np.exp(-3 * relative_length))
+df = pd.DataFrame(index=range(1, outlets + 1))
 
-df = pd.DataFrame({
-    "long_acum": long_acum,
-    "HL_acum": HL_acum,
-    "v_tramo": np.full_like(long_acum, velocity_inlet),
-    "t_acum": t_acum
-})
+df["outlets"] = df.index
+df["long_acum"] = df.index * S
 
-# ------------------------------------------------------
-# GRAPHICS
-# ------------------------------------------------------
+Q_total = outlets * q
+df["q_tramo"] = Q_total - df.index * q
+
+Area = np.pi * (dia / 2000)**2
+
+# velocity (m/s)
+df["v_tramo"] = df["q_tramo"] / 1000 / 3600 / Area
+
+# avoid zero velocity in last segment
+df["v_tramo"] = df["v_tramo"].replace(0, np.nan)
+df["v_tramo"] = df["v_tramo"].fillna(method="ffill")
+
+# time per segment (seconds)
+df["t_tramo"] = S / df["v_tramo"]
+
+# ----------------------------------------------------------
+# SCALE TIME TO MATCH EMPIRICAL MODEL
+# ----------------------------------------------------------
+
+TT_hydraulic_minutes = df["t_tramo"].sum() / 60
+
+scale_factor = TT_empirical / TT_hydraulic_minutes
+
+df["t_tramo"] = df["t_tramo"] * scale_factor
+
+df["t_acum"] = df["t_tramo"].cumsum() / 60
+
+travel_time = round(df["t_acum"].iloc[-1], 4)
+
+index_95 = int(outlets * 0.95)
+travel_time_95 = round(df.loc[index_95, "t_acum"], 4)
+
+# ----------------------------------------------------------
+# HEAD LOSS CALCULATION
+# ----------------------------------------------------------
+
+df["headloss"] = 1.131 * 10**9 * (df["q_tramo"] / 1000 / 140)**1.852 * S * dia**-4.872
+df["HL_acum"] = df["headloss"].cumsum()
+
+HF = round(df["headloss"].sum(), 3)
+
+# ----------------------------------------------------------
+# DISPLAY METRICS
+# ----------------------------------------------------------
+
+col1, col2, col3 = st.columns(3)
+
+col1.metric("Travel Time (100%) [min]", f"{travel_time:.3f}")
+col2.metric("Travel Time (95%) [min]", f"{travel_time_95:.3f}")
+col3.metric("Total Head Loss [m]", f"{HF:.3f}")
+
+# ----------------------------------------------------------
+# GRAPHS (IDENTICAL STYLE TO YOUR EXAMPLE)
+# ----------------------------------------------------------
+
 fig = plt.figure(figsize=(16, 6))
 
-def configurar_ejes(ax):
+def configure_axes(ax):
     ax.grid(False)
     ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
+    ax.spines['right'].set_visible(True)
+    ax.spines['left'].set_visible(True)
+    ax.spines['bottom'].set_visible(True)
     ax.spines['left'].set_linewidth(1.5)
     ax.spines['bottom'].set_linewidth(1.5)
-    ax.tick_params(labelsize=11)
+    ax.tick_params(labelsize=12)
 
-# GRAPH A
+# ---------------- GRAPH A ----------------
+
 ax1 = fig.add_subplot(131)
-configurar_ejes(ax1)
-ax1.set_xlabel('Length of pipe (m)')
-ax1.set_ylabel('Accumulated headloss (m)', color='red')
-ax1.plot(df['long_acum'], df['HL_acum'], 'r--')
-ax1.tick_params(axis='y', labelcolor='red')
-ax1.set_title('(A)')
+configure_axes(ax1)
+
+color = 'tab:red'
+ax1.set_xlabel('Length of pipe (m)', fontsize=12)
+ax1.set_ylabel('Accumulated headloss (m)', color=color, fontsize=12)
+ax1.plot(df['long_acum'], df['HL_acum'], color=color, linestyle='--')
+ax1.tick_params(axis='y', labelcolor=color)
+ax1.set_title('(A)', fontsize=14)
 
 ax2 = ax1.twinx()
-configurar_ejes(ax2)
-ax2.set_ylabel('Travel time (min)', color='blue')
-ax2.plot(df['long_acum'], df['t_acum'], 'b')
-ax2.tick_params(axis='y', labelcolor='blue')
+configure_axes(ax2)
+color = 'tab:blue'
+ax2.set_ylabel('Travel time (min)', color=color, fontsize=12)
+ax2.scatter(df['long_acum'], df['t_acum'], color=color, s=10)
+ax2.tick_params(axis='y', labelcolor=color)
 
-# GRAPH B
+# ---------------- GRAPH B ----------------
+
 ax1 = fig.add_subplot(132)
-configurar_ejes(ax1)
-ax1.set_xlabel('Length of pipe (m)')
-ax1.set_ylabel('Velocity (m/s)', color='red')
-ax1.plot(df['long_acum'], df['v_tramo'], 'r--')
-ax1.tick_params(axis='y', labelcolor='red')
-ax1.set_title('(B)')
+configure_axes(ax1)
+
+color = 'tab:red'
+ax1.set_xlabel('Length of pipe (m)', fontsize=12)
+ax1.set_ylabel('Velocity (m/s)', color=color, fontsize=12)
+ax1.plot(df['long_acum'], df['v_tramo'], color=color, linestyle='--')
+ax1.tick_params(axis='y', labelcolor=color)
+ax1.set_title('(B)', fontsize=14)
 
 ax2 = ax1.twinx()
-configurar_ejes(ax2)
-ax2.set_ylabel('Travel time (min)', color='blue')
-ax2.plot(df['long_acum'], df['t_acum'], 'b')
-ax2.tick_params(axis='y', labelcolor='blue')
+configure_axes(ax2)
+color = 'tab:blue'
+ax2.set_ylabel('Travel time (min)', color=color, fontsize=12)
+ax2.scatter(df['long_acum'], df['t_acum'], color=color, s=10)
+ax2.tick_params(axis='y', labelcolor=color)
 
-# GRAPH C
-a = np.linspace(0, 1, 100)
-b = np.exp(-4 * a)
-c = 1 - b
+# ---------------- GRAPH C ----------------
+
+a = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.00]
+b = [0.00, 0.47, 0.25, 0.13, 0.07, 0.04, 0.02, 0.01, 0.01, 0.00, 0.00]
+c = [0, 0.47, 0.71, 0.85, 0.92, 0.96, 0.98, 0.99, 0.99, 1, 1]
 
 ax1 = fig.add_subplot(133)
-configurar_ejes(ax1)
-ax1.set_xlabel('Relative advance time')
-ax1.set_ylabel('Frequency', color='red')
-ax1.plot(a, b, 'r')
-ax1.set_title('(C)')
+configure_axes(ax1)
+
+color = 'tab:red'
+ax1.set_xlabel('Relative advance time', fontsize=12)
+ax1.set_ylabel('Frequency', color=color, fontsize=12)
+ax1.plot(a, b, color=color)
+ax1.tick_params(axis='y', labelcolor=color)
+ax1.set_title('(C)', fontsize=14)
 
 ax2 = ax1.twinx()
-configurar_ejes(ax2)
-ax2.set_ylabel('Cumulative relative length', color='blue')
-ax2.plot(a, c, 'b')
+configure_axes(ax2)
+color = 'tab:blue'
+ax2.set_ylabel('Cumulative relative length', color=color, fontsize=12)
+ax2.plot(a, c, color=color)
+ax2.tick_params(axis='y', labelcolor=color)
 
-plt.tight_layout()
-plt.savefig("hydraulic_advance_figure.png", dpi=300, bbox_inches='tight')
+fig.tight_layout()
 
 st.pyplot(fig)
 
-# ------------------------------------------------------
-# RESULTS
-# ------------------------------------------------------
-st.metric("Travel Time - Full Length (min)", f"{TT_full:.2f}")
-st.metric("Travel Time - 95% Length (min)", f"{TT_95:.2f}")
-st.metric("Estimated Inlet Velocity (m/s)", f"{velocity_inlet:.3f}")
+# ----------------------------------------------------------
+# EXPORT OPTION
+# ----------------------------------------------------------
+
+st.download_button(
+    label="Download Results CSV",
+    data=df.to_csv(index=False),
+    file_name="hydraulic_advance_results.csv",
+    mime="text/csv"
+)
