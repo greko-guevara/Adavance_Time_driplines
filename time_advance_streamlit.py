@@ -58,7 +58,7 @@ st.markdown("---")
 # ======================================================
 st.subheader("1️⃣ Travel Time vs Lateral Length")
 
-length_range = np.linspace(10, 300, 100)
+length_range = np.linspace(10, 300, 200)
 TT_values = travel_time(spacing, length_range, diameter, flow_dripper)
 
 fig1 = go.Figure()
@@ -67,6 +67,7 @@ fig1.add_trace(go.Scatter(
     y=TT_values,
     mode='lines',
     name="Travel Time",
+    line=dict(width=4)
 ))
 
 fig1.update_layout(
@@ -79,38 +80,44 @@ fig1.update_layout(
 
 st.plotly_chart(fig1, use_container_width=True)
 
-# ======================================================
-# GRAPH 2: Lateral Length vs Flow Velocity
-# ======================================================
-st.subheader("2️⃣ Lateral Length vs Flow Velocity")
 
-# Convert diameter from mm to meters
+# ======================================================
+# GRAPH 2: Lateral Length vs Inlet Flow Velocity
+# ======================================================
+st.subheader("2️⃣ Lateral Length vs Inlet Flow Velocity")
+
+# Convert diameter to meters
 diameter_m = diameter / 1000
 
-# Flow per emitter converted from L/h to m³/s
-flow_m3s = flow_dripper / 1000 / 3600
-
-# Cross-sectional area
+# Cross-sectional area (m²)
 area = np.pi * (diameter_m / 2) ** 2
 
-# Velocity
-velocity = flow_m3s / area
+# Convert emitter flow to m³/s
+flow_m3s = flow_dripper / 1000 / 3600
 
-velocity_array = np.full_like(length_range, velocity)
+# Number of emitters for each length
+emitters = length_range / spacing
+
+# Inlet flow for each length
+Q_inlet = emitters * flow_m3s
+
+# Velocity at inlet
+velocity = Q_inlet / area
 
 fig2 = go.Figure()
 fig2.add_trace(go.Scatter(
     x=length_range,
-    y=velocity_array,
+    y=velocity,
     mode='lines',
-    name="Flow Velocity",
+    name="Inlet Velocity",
+    line=dict(width=4)
 ))
 
 fig2.update_layout(
     xaxis_title="Lateral Length (m)",
-    yaxis_title="Average Flow Velocity (m/s)",
+    yaxis_title="Inlet Flow Velocity (m/s)",
     template="plotly_white",
-    title="Estimated Internal Flow Velocity",
+    title="Inlet Velocity as Function of Lateral Length",
     height=500
 )
 
